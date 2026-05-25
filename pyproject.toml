@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openwiki"
+version = "0.1.0"
+description = "Open benchmark toolkit for enterprise wiki and knowledge-base retrieval."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [
+  { name = "OpenWiki contributors" }
+]
+dependencies = []
+
+[project.scripts]
+openwiki-bench = "openwiki.runner:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["openwiki*"]
+

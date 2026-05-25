@@ -1,0 +1,2 @@
+"""Framework helpers for OpenWiki."""
+

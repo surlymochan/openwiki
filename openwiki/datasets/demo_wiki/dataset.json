@@ -1,0 +1,7 @@
+{
+  "id": "demo_wiki",
+  "title": "Demo Wiki Evaluation",
+  "description": "Safe public dataset for validating a markdown knowledge base benchmark starter.",
+  "evaluator": "evaluator.py"
+}
+

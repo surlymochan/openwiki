@@ -1,0 +1,22 @@
+name: demo-benchmark
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  filesystem-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run demo benchmark
+        run: |
+          python -m openwiki.runner \
+            --dataset demo_wiki \
+            --docs-root examples/demo_wiki_docs \
+            --provider filesystem \
+            --runs-dir /tmp/openwiki-runs
+
