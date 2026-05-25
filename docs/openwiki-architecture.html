@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenWiki System Architecture</title>
+  <style>
+    :root {
+      --paper: #f5efe2;
+      --paper-2: #fff9ec;
+      --ink: #1f211c;
+      --muted: #6d675b;
+      --line: #272922;
+      --rust: #b94e2f;
+      --moss: #5d7144;
+      --blueprint: #244c61;
+      --soft-line: rgba(31, 33, 28, 0.16);
+      --shadow: 0 28px 80px rgba(41, 35, 24, 0.16);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% 18%, rgba(185, 78, 47, 0.16), transparent 28rem),
+        radial-gradient(circle at 92% 4%, rgba(93, 113, 68, 0.18), transparent 24rem),
+        linear-gradient(135deg, var(--paper), #eadfca);
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+      line-height: 1.55;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.35;
+      background-image:
+        linear-gradient(var(--soft-line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--soft-line) 1px, transparent 1px);
+      background-size: 42px 42px;
+      mask-image: linear-gradient(to bottom, black, transparent 88%);
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 24px auto;
+      padding: clamp(24px, 4vw, 48px);
+      background: color-mix(in oklch, var(--paper-2), white 12%);
+      border: 2px solid var(--line);
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+    }
+
+    main::after {
+      content: "OPENWIKI / SYSTEM";
+      position: absolute;
+      top: 26px;
+      right: -42px;
+      transform: rotate(12deg);
+      padding: 8px 44px;
+      color: rgba(31, 33, 28, 0.36);
+      border: 1px solid rgba(31, 33, 28, 0.3);
+      font: 700 12px/1.1 "Avenir Next Condensed", "Arial Narrow", sans-serif;
+      letter-spacing: 0.22em;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: 1.3fr 0.7fr;
+      gap: clamp(24px, 5vw, 72px);
+      align-items: end;
+      border-bottom: 2px solid var(--line);
+      padding-bottom: clamp(18px, 3vw, 30px);
+    }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      color: var(--rust);
+      font: 800 13px/1 "Avenir Next Condensed", "Arial Narrow", sans-serif;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 900px;
+      font-size: clamp(42px, 8vw, 108px);
+      line-height: 0.9;
+      letter-spacing: -0.065em;
+    }
+
+    h1 span {
+      display: block;
+      color: var(--blueprint);
+    }
+
+    .summary {
+      margin: 0;
+      font-size: clamp(18px, 2vw, 24px);
+      color: var(--muted);
+    }
+
+    .summary strong {
+      color: var(--ink);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+      gap: clamp(22px, 3vw, 34px);
+      margin-top: clamp(22px, 4vw, 42px);
+    }
+
+    section {
+      min-width: 0;
+    }
+
+    h2 {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 14px;
+      font: 900 clamp(20px, 3vw, 30px)/1 "Avenir Next Condensed", "Arial Narrow", sans-serif;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    h2::before {
+      content: "";
+      width: 42px;
+      height: 9px;
+      background: var(--rust);
+      box-shadow: 12px 10px 0 var(--moss);
+      transform: skewX(-18deg);
+    }
+
+    .panel {
+      border: 2px solid var(--line);
+      background:
+        linear-gradient(145deg, rgba(255, 255, 255, 0.38), transparent),
+        rgba(245, 239, 226, 0.78);
+      padding: clamp(16px, 2.4vw, 24px);
+    }
+
+    .diagram {
+      margin: 0;
+      white-space: pre;
+      overflow-x: auto;
+      color: #18201a;
+      background: #f8f0dd;
+      border: 1px dashed rgba(31, 33, 28, 0.5);
+      padding: 18px;
+      font: 700 clamp(10px, 0.96vw, 12px)/1.28 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    .flow {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .flow li {
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 12px;
+      align-items: start;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--soft-line);
+    }
+
+    .flow li:last-child {
+      border-bottom: 0;
+    }
+
+    .step {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border: 2px solid var(--line);
+      background: var(--ink);
+      color: var(--paper-2);
+      font: 900 15px/1 "Avenir Next Condensed", "Arial Narrow", sans-serif;
+    }
+
+    .flow strong {
+      display: block;
+      margin-bottom: 2px;
+      font-size: 17px;
+    }
+
+    .flow span {
+      color: var(--muted);
+    }
+
+    .strips {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .strip {
+      min-height: 132px;
+      border: 2px solid var(--line);
+      padding: 16px;
+      background: #efe4cf;
+      position: relative;
+    }
+
+    .strip::after {
+      content: attr(data-weight);
+      position: absolute;
+      right: 12px;
+      bottom: 10px;
+      color: rgba(31, 33, 28, 0.36);
+      font: 900 28px/1 "Avenir Next Condensed", "Arial Narrow", sans-serif;
+    }
+
+    .strip h3 {
+      margin: 0 0 8px;
+      font: 900 18px/1.1 "Avenir Next Condensed", "Arial Narrow", sans-serif;
+      text-transform: uppercase;
+    }
+
+    .strip p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .strip:nth-child(1) {
+      background: #f4d9c8;
+    }
+
+    .strip:nth-child(2) {
+      background: #dfebd1;
+    }
+
+    .strip:nth-child(3) {
+      background: #d8e8ee;
+    }
+
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 0.85fr 1.15fr;
+      gap: clamp(18px, 3vw, 30px);
+      margin-top: clamp(22px, 4vw, 34px);
+    }
+
+    .callout {
+      border-left: 10px solid var(--rust);
+      padding: 18px 20px;
+      background: rgba(185, 78, 47, 0.08);
+      font-size: 18px;
+    }
+
+    .callout strong {
+      color: var(--rust);
+    }
+
+    .mini-table {
+      display: grid;
+      border: 2px solid var(--line);
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      border-bottom: 1px solid var(--soft-line);
+    }
+
+    .row:last-child {
+      border-bottom: 0;
+    }
+
+    .row b,
+    .row span {
+      padding: 12px 14px;
+    }
+
+    .row b {
+      color: var(--paper-2);
+      background: var(--ink);
+      font: 900 15px/1.2 "Avenir Next Condensed", "Arial Narrow", sans-serif;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .row span {
+      color: var(--muted);
+    }
+
+    code {
+      color: var(--blueprint);
+      font-weight: 800;
+    }
+
+    @media print {
+      body {
+        background: var(--paper-2);
+      }
+
+      main {
+        width: 100%;
+        min-height: 100vh;
+        margin: 0;
+        box-shadow: none;
+        border: 0;
+      }
+    }
+
+    @media (max-width: 920px) {
+      header,
+      .grid,
+      .footer-grid,
+      .strips {
+        grid-template-columns: 1fr;
+      }
+
+      main::after {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">Open-source enterprise knowledge benchmark</p>
+        <h1>OpenWiki <span>system map</span></h1>
+      </div>
+      <p class="summary">
+        最新主路径是 <strong><code>openwiki_system</code></strong>：把 raw files、BM25 RAG、mem0、LLM wiki
+        合成一个整体能力；<code>filesystem</code> 和 <code>mem0</code> 只是组件级对照。
+      </p>
+    </header>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>System Architecture</h2>
+        <pre class="diagram">+------------------+   +-------------------+
+| openwiki.runner  |-->| Dataset + Judge   |
+| benchmark CLI    |   | questions/eval    |
++---------+--------+   +---------+---------+
+          |                      |
+          v                      v
+     +----+----- Provider Selection -----+
+     | system -> OpenWikiSystemProvider  |
+     | all    -> system + baselines      |
+     +----------------+------------------+
+                      |
+                      v
+        +-------------+-------------+
+        |    openwiki_system        |
+        | raw files + BM25 RAG      |
+        | mem0 + LLM wiki + rerank  |
+        +------+------+------+------+
+               |      |      |
+               v      v      v
+        +------+ +----+---+ +------+
+        | raw  | | mem0   | | wiki |
+        | BM25 | | sem.   | | BM25 |
+        | .95  | | 1.00   | | 1.15 |
+        +--+---+ +----+---+ +--+---+
+           |          |        |
+           +----------+--------+
+                      |
+                      v
+       normalize -> route weight -> boost
+                      |
+                      v
+                   top_k evidence</pre>
+      </section>
+
+      <section class="panel">
+        <h2>Runtime Flow</h2>
+        <ol class="flow">
+          <li>
+            <span class="step">1</span>
+            <span><strong>Load dataset</strong>读取 <code>dataset.json</code>、<code>questions.json</code> 和可选 evaluator。</span>
+          </li>
+          <li>
+            <span class="step">2</span>
+            <span><strong>Build indexes</strong>raw markdown 建 BM25；mem0 走远端服务或 local fallback；LLM wiki 单独建索引。</span>
+          </li>
+          <li>
+            <span class="step">3</span>
+            <span><strong>Search all routes</strong>同一问题同时进入 raw、mem0、wiki 三条召回路线。</span>
+          </li>
+          <li>
+            <span class="step">4</span>
+            <span><strong>Merge and rerank</strong>按路线归一化、权重、source hints、问题类型、多路线命中加分排序。</span>
+          </li>
+          <li>
+            <span class="step">5</span>
+            <span><strong>Judge and report</strong>输出 retrieval 指标、answer 指标、JSON 报告和 Markdown 对比表。</span>
+          </li>
+        </ol>
+      </section>
+    </div>
+
+    <section>
+      <div class="strips">
+        <article class="strip" data-weight="0.95">
+          <h3>Raw files + BM25</h3>
+          <p>保底事实召回层，适合精确词、文件路径、政策条款和 abstention 场景。</p>
+        </article>
+        <article class="strip" data-weight="1.00">
+          <h3>mem0 semantic</h3>
+          <p>语义记忆层，适合表达差异、多跳线索和非精确匹配问题。</p>
+        </article>
+        <article class="strip" data-weight="1.15">
+          <h3>LLM wiki</h3>
+          <p>编译后的知识层，适合跨文档归纳、边界判断和时间线问题。</p>
+        </article>
+      </div>
+    </section>
+
+    <div class="footer-grid">
+      <section class="callout">
+        <strong>一句话：</strong>
+        OpenWiki 现在评测的是一个企业知识库系统的整体回答能力，而不是某个单独检索器的孤立分数。
+      </section>
+
+      <section class="mini-table" aria-label="OpenWiki provider model">
+        <div class="row">
+          <b>system</b>
+          <span>主能力：raw files + BM25 RAG + mem0 + LLM wiki + rerank。</span>
+        </div>
+        <div class="row">
+          <b>components</b>
+          <span>消融对照：单独跑 filesystem 和 mem0，定位是哪层拖累或贡献。</span>
+        </div>
+        <div class="row">
+          <b>all</b>
+          <span>完整对比：同时生成 system、filesystem、mem0 的报告和 comparison。</span>
+        </div>
+        <div class="row">
+          <b>reports</b>
+          <span>指标包括 accuracy、Recall@1/3/5、MRR、NDCG@5，以及按 question type 分组。</span>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

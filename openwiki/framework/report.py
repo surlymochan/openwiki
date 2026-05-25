@@ -21,6 +21,7 @@ def build_report(
     answer_scores: list[AnswerScore],
     run_id: str,
     questions: list[dict],
+    llm_config: dict | None = None,
 ) -> dict:
     by_type_retrieval: dict[str, list[RetrievalScore]] = defaultdict(list)
     by_type_answer: dict[str, list[AnswerScore]] = defaultdict(list)
@@ -57,6 +58,7 @@ def build_report(
         "provider_stats": provider_stats,
         "benchmark": dataset["id"],
         "dataset": dataset,
+        "llm": llm_config or {},
         "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
         "summary": {
             "total_questions": len(retrieval_scores),
@@ -125,6 +127,7 @@ def write_report(report: dict, out_dir: pathlib.Path) -> tuple[pathlib.Path, pat
         f"**Provider**: `{report['provider']}`  ",
         f"**Run ID**: `{report['run_id']}`  ",
         f"**Generated**: {report['generated_at']}  ",
+        f"**LLM**: `{json.dumps(report.get('llm', {}), ensure_ascii=False)}`  ",
         f"**Indexed docs**: {report['provider_stats'].get('indexed_docs', '?')} ({report['provider_stats'].get('scope', '')})",
         "",
         "## MemScore",
@@ -146,16 +149,34 @@ def write_report(report: dict, out_dir: pathlib.Path) -> tuple[pathlib.Path, pat
         f"| MRR | {retrieval['mrr']:.3f} |",
         f"| NDCG@5 | {retrieval['ndcg_at_5']:.3f} |",
         "",
+        "## By Question Type",
+        "",
+        "| Type | Count | Recall@5 | MRR | Accuracy |",
+        "|------|-------|----------|-----|----------|",
+    ]
+    for question_type, metrics in report["by_question_type"].items():
+        type_retrieval = metrics["retrieval"]
+        type_answer = metrics["answer"]
+        lines.append(
+            f"| {question_type} | {type_retrieval['count']} | "
+            f"{type_retrieval['recall_at_5']:.2f} | {type_retrieval['mrr']:.2f} | "
+            f"{type_answer['accuracy']*100:.0f}% |"
+        )
+    lines.extend(
+        [
+            "",
         "## Detailed Results",
         "",
-        "| ID | Type | R@5 | MRR | Answer | Label | Top Retrieved |",
-        "|----|------|-----|-----|--------|-------|----------------|",
-    ]
+        "| ID | Type | R@1 | R@5 | MRR | Answer | Label | Top Retrieved |",
+        "|----|------|-----|-----|-----|--------|-------|----------------|",
+        ]
+    )
     for result in report["detailed_results"]:
         retrieval_row = result["retrieval"]
         answer_row = result["answer"]
         lines.append(
             f"| {result['question_id']} | {result['question_type']} | "
+            f"{'✓' if retrieval_row['hit_at_1'] else '✗'} | "
             f"{'✓' if retrieval_row['hit_at_5'] else '✗'} | "
             f"{retrieval_row['mrr']:.2f} | "
             f"{answer_row.get('score', 0)*100:.0f}% | "
@@ -164,4 +185,3 @@ def write_report(report: dict, out_dir: pathlib.Path) -> tuple[pathlib.Path, pat
         )
     md_path.write_text("\n".join(lines), encoding="utf-8")
     return json_path, md_path
-

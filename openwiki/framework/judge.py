@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from types import ModuleType
 
+from openwiki.framework import llm as llm_framework
 from openwiki.framework.provider import SearchResult
 
 
@@ -55,6 +56,10 @@ def _hints_covered_at_k(results: list[SearchResult], hints: list[str], top_k: in
             if _hint_in_path(result.path, hint):
                 found.add(hint)
     return len(found) == len(hints)
+
+
+def _all_hints_covered(results: list[SearchResult], hints: list[str], top_k: int) -> bool:
+    return _hints_covered_at_k(results, hints, top_k)
 
 
 def _all_hints_coverage_rank(results: list[SearchResult], hints: list[str]) -> int | None:
@@ -139,6 +144,40 @@ def _strip_frontmatter(text: str) -> str:
     return text
 
 
+def _find_result_by_hint(results: list[SearchResult], hint: str) -> SearchResult | None:
+    hint_lower = hint.lower()
+    for result in results:
+        if hint_lower in result.path.lower():
+            return result
+    return None
+
+
+def _find_lines_by_terms(content: str, terms: list[str], max_lines: int = 3) -> list[str]:
+    lines = [line.strip() for line in content.splitlines() if line.strip() and line.strip() != "---"]
+    matched = [line for line in lines if any(term in line for term in terms)]
+    return matched[:max_lines]
+
+
+def _full_content(result: SearchResult) -> str:
+    try:
+        return pathlib.Path(result.path).read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return result.content
+
+
+def prioritized_unique_results(results: list[SearchResult], limit: int) -> list[SearchResult]:
+    unique: list[SearchResult] = []
+    seen = set()
+    for result in results:
+        if result.path in seen:
+            continue
+        seen.add(result.path)
+        unique.append(result)
+        if len(unique) >= limit:
+            break
+    return unique
+
+
 def _select_relevant_lines(question: str, content: str, max_lines: int = 3) -> list[str]:
     query_tokens = _cjk_tokens(question)
     lines = [line.strip() for line in _strip_frontmatter(content).splitlines() if line.strip()]
@@ -196,12 +235,25 @@ def build_answer_from_context(
     results: list[SearchResult],
     question_meta: dict | None = None,
     evaluator: ModuleType | None = None,
+    use_llm: bool = False,
 ) -> str:
+    draft = None
     if evaluator and hasattr(evaluator, "build_answer_from_context"):
         draft = evaluator.build_answer_from_context(question, results, question_meta)
         if draft is not None:
-            return str(draft)[:500].strip()
-    return build_default_answer_from_context(question, results, question_meta)
+            draft = str(draft)
+    if draft is None:
+        draft = build_default_answer_from_context(question, results, question_meta)
+    if use_llm:
+        payload = llm_framework.synthesize_answer(
+            question,
+            results,
+            question_meta=question_meta,
+            draft_answer=str(draft),
+        )
+        if payload and payload.get("answer"):
+            return str(payload["answer"])[:500].strip()
+    return str(draft)[:500].strip()
 
 
 _UNCERTAINTY_SIGNALS = ["没有", "不知道", "无法", "未记录", "not found", "unknown", "not documented"]
@@ -212,12 +264,67 @@ def evaluate_default_answer(
     generated: str,
     ground_truth: str,
     question_type: str,
+    question: dict | None = None,
+    results: list[SearchResult] | None = None,
 ) -> AnswerScore:
     if question_type in {"abstention_strict", "abstention"}:
         has_uncertainty = any(signal in generated.lower() for signal in _UNCERTAINTY_SIGNALS)
         score = 1.0 if has_uncertainty else 0.0
         label = "correct" if score >= 0.7 else "incorrect"
         return AnswerScore(question_id, generated[:200], ground_truth[:200], score, label, "abstention signal check")
+    if question_type == "abstention_partial":
+        partial_signals = ["部分", "只记录了", "有限", "不完整", "没有具体", "未记录", "没有详细", "无法确认"]
+        has_partial = any(signal in generated for signal in partial_signals)
+        keyword_score = keyword_overlap_score(generated, ground_truth)
+        score = max(0.7 if has_partial else 0.0, keyword_score)
+        label = "correct" if score >= 0.6 else ("partial" if score >= 0.3 else "incorrect")
+        return AnswerScore(
+            question_id,
+            generated[:200],
+            ground_truth[:200],
+            score,
+            label,
+            f"abstention_partial: partial_signal={has_partial} keyword_f1={keyword_score:.3f}",
+        )
+    if question_type == "conflict_detection":
+        conflict_signals = ["不一致", "冲突", "两处", "分别", "矛盾", "不同", "差异", "存在差异"]
+        has_conflict = any(signal in generated for signal in conflict_signals)
+        keyword_score = keyword_overlap_score(generated, ground_truth)
+        score = max(0.7 if has_conflict else 0.0, keyword_score)
+        label = "correct" if score >= 0.6 else ("partial" if score >= 0.3 else "incorrect")
+        return AnswerScore(
+            question_id,
+            generated[:200],
+            ground_truth[:200],
+            score,
+            label,
+            f"conflict_detection: conflict_signal={has_conflict} keyword_f1={keyword_score:.3f}",
+        )
+    if question_type in {"knowledge_update", "recency_preference"}:
+        judge = question.get("judge", {}) if question else {}
+        must_include = judge.get("must_include", [])
+        preferred_hint = judge.get("preferred_source_hint")
+        coverage = sum(1 for term in must_include if term in generated) / len(must_include) if must_include else 0.0
+        keyword_score = keyword_overlap_score(generated, ground_truth)
+        rank_score = 0.0
+        if preferred_hint and results:
+            rank = _first_hint_rank(results, [preferred_hint])
+            if rank == 1:
+                rank_score = 1.0
+            elif rank is not None and rank <= 3:
+                rank_score = 0.7
+            elif rank is not None and rank <= 5:
+                rank_score = 0.4
+        score = max(keyword_score, 0.6 * coverage + 0.4 * rank_score)
+        label = "correct" if score >= 0.6 else ("partial" if score >= 0.3 else "incorrect")
+        return AnswerScore(
+            question_id,
+            generated[:200],
+            ground_truth[:200],
+            score,
+            label,
+            f"{question_type}: keyword_f1={keyword_score:.3f} must_include={coverage:.2f} source_rank={rank_score:.2f}",
+        )
     score = keyword_overlap_score(generated, ground_truth)
     label = "correct" if score >= 0.6 else ("partial" if score >= 0.3 else "incorrect")
     return AnswerScore(question_id, generated[:200], ground_truth[:200], score, label, f"keyword F1 overlap: {score:.3f}")
@@ -231,9 +338,30 @@ def evaluate_answer(
     question: dict | None = None,
     results: list[SearchResult] | None = None,
     evaluator: ModuleType | None = None,
+    use_llm: bool = False,
 ) -> AnswerScore:
+    if use_llm:
+        payload = llm_framework.judge_answer(
+            question=question.get("question", "") if question else "",
+            generated=generated,
+            ground_truth=ground_truth,
+            question_type=question_type,
+            results=results,
+        )
+        if payload:
+            score = float(payload.get("score", 0.0))
+            label = str(payload.get("label", "incorrect"))
+            explanation = str(payload.get("explanation", "llm_judge"))
+            return AnswerScore(
+                question_id=question_id,
+                generated_answer=generated[:200],
+                ground_truth=ground_truth[:200],
+                score=max(0.0, min(score, 1.0)),
+                label=label if label in {"correct", "partial", "incorrect"} else "incorrect",
+                explanation=f"llm_judge: {explanation}",
+            )
     if evaluator and hasattr(evaluator, "evaluate_answer"):
         scored = evaluator.evaluate_answer(question_id, generated, ground_truth, question_type, question, results)
         if scored is not None:
             return scored
-    return evaluate_default_answer(question_id, generated, ground_truth, question_type)
+    return evaluate_default_answer(question_id, generated, ground_truth, question_type, question, results)

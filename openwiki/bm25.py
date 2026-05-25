@@ -57,6 +57,43 @@ class BM25Index:
         self.avg_dl = total_len / max(len(self.docs), 1)
         self._built = True
 
+    def to_payload(self) -> dict:
+        assert self._built, "Call add_documents first"
+        return {
+            "k1": self.k1,
+            "b": self.b,
+            "df": self.df,
+            "avg_dl": self.avg_dl,
+            "docs": [
+                {
+                    "doc_id": doc.doc_id,
+                    "path": doc.path,
+                    "content": doc.content,
+                    "tokens": doc.tokens,
+                    "bucket": doc.bucket,
+                }
+                for doc in self.docs
+            ],
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict) -> "BM25Index":
+        index = cls(k1=float(payload.get("k1", 1.5)), b=float(payload.get("b", 0.75)))
+        index.docs = [
+            Document(
+                doc_id=row["doc_id"],
+                path=row["path"],
+                content=row["content"],
+                tokens=list(row.get("tokens", [])),
+                bucket=row.get("bucket", ""),
+            )
+            for row in payload.get("docs", [])
+        ]
+        index.df = {str(key): int(value) for key, value in (payload.get("df") or {}).items()}
+        index.avg_dl = float(payload.get("avg_dl", 0.0))
+        index._built = True
+        return index
+
     def search(self, query: str, top_k: int = 5) -> list[tuple[Document, float]]:
         assert self._built, "Call add_documents first"
         q_tokens = tokenize(query)
@@ -87,14 +124,15 @@ class BM25Index:
 def load_markdown_files(
     root: pathlib.Path,
     exclude_dirs: set[str] | None = None,
+    include_only_dirs: set[str] | None = None,
     max_chunk_chars: int = 2000,
     use_cache: bool = True,
 ) -> list[Document]:
     if exclude_dirs is None:
         exclude_dirs = set()
     root = root.resolve()
-    cache_path = _cache_path(root, exclude_dirs, max_chunk_chars)
-    candidates = _collect_markdown_candidates(root, exclude_dirs)
+    cache_path = _cache_path(root, exclude_dirs, include_only_dirs, max_chunk_chars)
+    candidates = _collect_markdown_candidates(root, exclude_dirs, include_only_dirs)
     fingerprint = _fingerprint_candidates(root, candidates, max_chunk_chars)
     if use_cache:
         cached = _load_cached_docs(cache_path, fingerprint)
@@ -143,11 +181,16 @@ def load_markdown_files(
 def _collect_markdown_candidates(
     root: pathlib.Path,
     exclude_dirs: set[str],
+    include_only_dirs: set[str] | None = None,
 ) -> list[tuple[pathlib.Path, list[str]]]:
     candidates: list[tuple[pathlib.Path, list[str]]] = []
     for dirpath, dirnames, filenames in os.walk(root):
         rel = pathlib.Path(dirpath).relative_to(root)
         parts = list(rel.parts)
+        top = parts[0] if parts else ""
+        if include_only_dirs is not None and top not in include_only_dirs:
+            dirnames[:] = []
+            continue
         if set(parts) & exclude_dirs:
             dirnames[:] = []
             continue
@@ -157,16 +200,47 @@ def _collect_markdown_candidates(
     return candidates
 
 
-def _cache_path(root: pathlib.Path, exclude_dirs: set[str], max_chunk_chars: int) -> pathlib.Path:
-    cache_root = pathlib.Path(__file__).resolve().parents[1] / "data" / "cache"
+def _bm25_cache_root() -> pathlib.Path:
+    configured = os.environ.get("OPENWIKI_BM25_CACHE_ROOT", "")
+    cache_root = pathlib.Path(configured).expanduser() if configured else pathlib.Path(__file__).resolve().parents[1] / "data" / "cache"
     cache_root.mkdir(parents=True, exist_ok=True)
+    return cache_root
+
+
+def _cache_path(
+    root: pathlib.Path,
+    exclude_dirs: set[str],
+    include_only_dirs: set[str] | None,
+    max_chunk_chars: int,
+) -> pathlib.Path:
+    cache_root = _bm25_cache_root()
     payload = {
         "root": str(root),
         "exclude": sorted(exclude_dirs),
+        "include": sorted(include_only_dirs) if include_only_dirs else [],
         "max_chunk_chars": max_chunk_chars,
     }
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:16]
     return cache_root / f"docs-{digest}.json"
+
+
+def index_cache_path(name: str) -> pathlib.Path:
+    cache_root = _bm25_cache_root()
+    safe = re.sub(r"[^a-zA-Z0-9_.-]+", "-", name)
+    return cache_root / f"bm25-{safe}.json"
+
+
+def markdown_fingerprint(
+    root: pathlib.Path,
+    exclude_dirs: set[str] | None = None,
+    include_only_dirs: set[str] | None = None,
+    max_chunk_chars: int = 2000,
+) -> str:
+    if exclude_dirs is None:
+        exclude_dirs = set()
+    root = root.resolve()
+    candidates = _collect_markdown_candidates(root, exclude_dirs, include_only_dirs)
+    return _fingerprint_candidates(root, candidates, max_chunk_chars)
 
 
 def _fingerprint_candidates(
@@ -226,4 +300,3 @@ def _write_cached_docs(cache_path: pathlib.Path, fingerprint: str, docs: list[Do
         ],
     }
     cache_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-

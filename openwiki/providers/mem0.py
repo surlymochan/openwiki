@@ -87,13 +87,14 @@ class Mem0Provider(BaseProvider):
         }
 
     def _remote_search(self, query: str, top_k: int, meta: dict[str, Any]) -> list[SearchResult]:
-        payload = {
-            "query": query,
-            "limit": max(top_k * 3, top_k),
-            "user_id": self._user_id,
-            "filters": None,
-        }
-        response = self._remote_api_search(payload)
+        payload = build_mem0_search_payload(query, top_k, self._user_id)
+        response = remote_mem0_search(
+            payload,
+            api_url=self._remote_api_url,
+            ssh_host=self._ssh_host,
+            api_port=self._remote_api_port,
+            timeout_s=self._remote_timeout_s,
+        )
         results = response.get("results", [])
         item_map = {item.id: item for item in self._items}
         ranked: list[tuple[float, int, MemoryItem, dict[str, Any]]] = []
@@ -118,51 +119,6 @@ class Mem0Provider(BaseProvider):
             for out_rank, (score, _, item, row) in enumerate(ranked[:top_k], start=1)
         ]
 
-    def _remote_api_search(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self._remote_api_url:
-            request = urllib.request.Request(
-                self._remote_api_url.rstrip("/") + "/search",
-                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(request, timeout=self._remote_timeout_s) as response:
-                return json.loads(response.read().decode("utf-8"))
-
-        if not self._ssh_host:
-            raise RuntimeError("OPENWIKI_MEM0_API_URL or OPENWIKI_MEM0_SSH_HOST is required for remote mem0")
-
-        last_error: Exception | None = None
-        for attempt in range(3):
-            try:
-                completed = subprocess.run(
-                    [
-                        "ssh",
-                        self._ssh_host,
-                        (
-                            "curl -fsS --max-time "
-                            f"{self._remote_timeout_s} "
-                            "-H 'Content-Type: application/json' "
-                            f"-X POST http://127.0.0.1:{self._remote_api_port}/search "
-                            "--data-binary @-"
-                        ),
-                    ],
-                    input=json.dumps(payload, ensure_ascii=False),
-                    text=True,
-                    capture_output=True,
-                    check=True,
-                    timeout=self._remote_timeout_s + 5,
-                )
-                return json.loads(completed.stdout.strip() or "{}")
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-                last_error = exc
-                if attempt == 2:
-                    break
-                time.sleep(0.5 * (attempt + 1))
-        if isinstance(last_error, subprocess.CalledProcessError):
-            raise RuntimeError(f"remote mem0 search failed: {(last_error.stderr or '').strip()}") from last_error
-        raise RuntimeError("remote mem0 search timed out after retries") from last_error
-
 
 def _metadata_rerank(item: MemoryItem, score: float, meta: dict[str, Any]) -> float:
     hints = meta.get("source_hints", [])
@@ -177,11 +133,107 @@ def _metadata_rerank(item: MemoryItem, score: float, meta: dict[str, Any]) -> fl
 
 
 def _remote_hit_to_item(hit: dict[str, Any]) -> MemoryItem:
-    metadata = hit.get("metadata") or {}
+    normalized = normalize_remote_hit(hit)
     return MemoryItem(
-        id=str(metadata.get("doc_id") or hit.get("id") or ""),
-        text=str(hit.get("memory") or ""),
-        source_path=str(metadata.get("source_path") or ""),
-        source_type=str(metadata.get("source_type") or "source"),
-        tags=list(metadata.get("tags") or []),
+        id=normalized["doc_id"],
+        text=normalized["memory"],
+        source_path=normalized["source_path"],
+        source_type=normalized["source_type"],
+        tags=normalized["tags"],
     )
+
+
+def build_mem0_search_payload(
+    query: str,
+    top_k: int,
+    user_id: str,
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "query": query,
+        "limit": max(top_k * 3, top_k),
+        "user_id": user_id,
+        "filters": mem0_scope_filters(filters or {}),
+    }
+
+
+def mem0_scope_filters(filters: dict[str, Any]) -> dict[str, Any] | None:
+    scope = filters.get("scope")
+    if not scope or scope == "hybrid":
+        return None
+    if scope == "source":
+        return {"is_compiled": False}
+    if scope == "compiled":
+        return {"is_compiled": True}
+    if scope == "diary":
+        return {"source_type": "diary"}
+    return None
+
+
+def remote_mem0_search(
+    payload: dict[str, Any],
+    *,
+    api_url: str = "",
+    ssh_host: str = "",
+    api_port: int = 8787,
+    timeout_s: int = 25,
+) -> dict[str, Any]:
+    if api_url:
+        request = urllib.request.Request(
+            api_url.rstrip("/") + "/search",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    if not ssh_host:
+        raise RuntimeError("api_url or ssh_host is required for remote mem0")
+
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            completed = subprocess.run(
+                [
+                    "ssh",
+                    ssh_host,
+                    (
+                        "curl -fsS --max-time "
+                        f"{timeout_s} "
+                        "-H 'Content-Type: application/json' "
+                        f"-X POST http://127.0.0.1:{api_port}/search "
+                        "--data-binary @-"
+                    ),
+                ],
+                input=json.dumps(payload, ensure_ascii=False),
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=timeout_s + 5,
+            )
+            return json.loads(completed.stdout.strip() or "{}")
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            last_error = exc
+            if attempt == 2:
+                break
+            time.sleep(0.5 * (attempt + 1))
+    if isinstance(last_error, subprocess.CalledProcessError):
+        stderr = (last_error.stderr or "").strip()
+        raise RuntimeError(f"remote mem0 search failed: {stderr or 'ssh/curl returned non-zero'}") from last_error
+    raise RuntimeError("remote mem0 search timed out after retries") from last_error
+
+
+def normalize_remote_hit(hit: dict[str, Any]) -> dict[str, Any]:
+    metadata = hit.get("metadata") or {}
+    tags = metadata.get("tags") or []
+    return {
+        "id": str(hit.get("id") or metadata.get("doc_id") or ""),
+        "doc_id": str(metadata.get("doc_id") or hit.get("id") or ""),
+        "memory": str(hit.get("memory") or ""),
+        "score": float(hit.get("score", 0.0)),
+        "metadata": metadata,
+        "source_path": str(metadata.get("source_path") or ""),
+        "source_type": str(metadata.get("source_type") or "source"),
+        "tags": list(tags) if isinstance(tags, list) else [str(tags)],
+    }
