@@ -23,10 +23,11 @@ class Mem0Provider(BaseProvider):
         self.exclude_dirs = exclude_dirs or {".git", ".obsidian", "node_modules", "__pycache__"}
         self._index = BM25Index()
         self._items: list[MemoryItem] = []
-        self._backend = os.getenv("OPENWIKI_MEM0_BACKEND", "remote").strip().lower() or "remote"
+        configured_backend = os.getenv("OPENWIKI_MEM0_BACKEND", "").strip().lower()
         self._allow_local_fallback = os.getenv("OPENWIKI_MEM0_ALLOW_LOCAL_FALLBACK", "").strip().lower() in {"1", "true", "yes"}
         self._ssh_host = os.getenv("OPENWIKI_MEM0_SSH_HOST", "").strip()
         self._remote_api_url = os.getenv("OPENWIKI_MEM0_API_URL", "").strip()
+        self._backend = configured_backend or ("remote" if (self._ssh_host or self._remote_api_url) else "local-fallback")
         self._remote_api_port = int(os.getenv("OPENWIKI_MEM0_API_PORT", "8787"))
         self._remote_timeout_s = int(os.getenv("OPENWIKI_MEM0_TIMEOUT_S", "25"))
         self._user_id = os.getenv("OPENWIKI_MEM0_USER_ID", "openwiki-demo")
@@ -184,4 +185,3 @@ def _remote_hit_to_item(hit: dict[str, Any]) -> MemoryItem:
         source_type=str(metadata.get("source_type") or "source"),
         tags=list(metadata.get("tags") or []),
     )
-

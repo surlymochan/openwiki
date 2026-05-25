@@ -34,10 +34,11 @@ cd openwiki
 python3 -m openwiki.runner \
   --dataset demo_wiki \
   --docs-root examples/demo_wiki_docs \
-  --provider filesystem
+  --wiki-root examples/demo_llm_wiki_docs \
+  --provider system
 ```
 
-Reports are written to `runs/<timestamp>-filesystem/`.
+Reports are written to `runs/<timestamp>-openwiki_system/`.
 
 ### 2. Point it at your own wiki
 
@@ -50,7 +51,7 @@ python3 -m openwiki.runner \
 For real usage, replace the demo dataset under `openwiki/datasets/demo_wiki/`
 with a dataset that matches your own documentation.
 
-### 3. Optional: compare against mem0
+### 3. Optional: run component baselines
 
 Sync the same public demo docs to a mem0 service:
 
@@ -62,7 +63,7 @@ python3 -m openwiki.sync_mem0 \
   --user-id openwiki-demo
 ```
 
-Then run side-by-side:
+Then run the whole system and component baselines:
 
 ```bash
 OPENWIKI_MEM0_SSH_HOST=<ssh-host> \
@@ -71,7 +72,8 @@ OPENWIKI_MEM0_USER_ID=openwiki-demo \
 python3 -m openwiki.runner \
   --dataset demo_wiki \
   --docs-root examples/demo_wiki_docs \
-  --provider both
+  --wiki-root examples/demo_llm_wiki_docs \
+  --provider all
 ```
 
 This writes:
@@ -116,7 +118,18 @@ Each question supports:
 
 ## Provider Model
 
-The first open-source provider is `filesystem`.
+The main provider is `system`.
+
+It combines:
+
+- raw Markdown files
+- BM25 RAG
+- optional LLM-generated wiki/compiled docs
+- optional mem0 semantic retrieval
+
+The component providers are useful for ablation and debugging.
+
+`filesystem` is the zero-dependency local baseline.
 
 It:
 
@@ -128,8 +141,7 @@ It:
 If your team later wants semantic retrieval or a remote vector backend, add a new
 provider under `openwiki/providers/` without changing the dataset format.
 
-An optional `mem0` provider is included for side-by-side comparison when a mem0
-backend is available.
+An optional `mem0` provider is included for component-level comparison when a mem0 backend is available.
 
 ## Open-Source Boundary
 

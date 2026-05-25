@@ -11,6 +11,7 @@ from openwiki.framework.judge import build_answer_from_context, evaluate_answer,
 from openwiki.framework.report import build_report, write_report
 from openwiki.providers.filesystem import FilesystemProvider
 from openwiki.providers.mem0 import Mem0Provider
+from openwiki.providers.system import OpenWikiSystemProvider
 
 
 def filter_questions(questions: list[dict], question_ids: list[str]) -> list[dict]:
@@ -64,8 +65,9 @@ def run_provider(provider, questions: list[dict], top_k: int, evaluator=None) ->
 def main() -> int:
     parser = argparse.ArgumentParser(description="OpenWiki benchmark runner")
     parser.add_argument("--dataset", default="demo_wiki", help="Dataset id under openwiki/datasets/")
-    parser.add_argument("--provider", choices=["filesystem", "mem0", "both"], default="filesystem")
+    parser.add_argument("--provider", choices=["filesystem", "mem0", "system", "components", "all"], default="system")
     parser.add_argument("--docs-root", required=True, help="Root directory containing markdown docs")
+    parser.add_argument("--wiki-root", default="", help="Optional LLM-generated wiki/compiled docs root")
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--question-ids", default="", help="Comma-separated subset of question ids")
     parser.add_argument("--runs-dir", default="runs", help="Directory where reports are written")
@@ -80,9 +82,12 @@ def main() -> int:
 
     run_ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     providers = []
-    if args.provider in {"filesystem", "both"}:
+    wiki_root = pathlib.Path(args.wiki_root) if args.wiki_root else None
+    if args.provider in {"system", "all"}:
+        providers.append(OpenWikiSystemProvider(pathlib.Path(args.docs_root), wiki_root=wiki_root))
+    if args.provider in {"filesystem", "components", "all"}:
         providers.append(FilesystemProvider(pathlib.Path(args.docs_root)))
-    if args.provider in {"mem0", "both"}:
+    if args.provider in {"mem0", "components", "all"}:
         providers.append(Mem0Provider(pathlib.Path(args.docs_root)))
 
     reports = []

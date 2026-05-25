@@ -7,5 +7,5 @@ cd "$ROOT"
 python3 -m openwiki.runner \
   --dataset demo_wiki \
   --docs-root examples/demo_wiki_docs \
-  --provider filesystem
-
+  --wiki-root examples/demo_llm_wiki_docs \
+  --provider system
