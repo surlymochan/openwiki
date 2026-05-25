@@ -57,6 +57,17 @@ def _hints_covered_at_k(results: list[SearchResult], hints: list[str], top_k: in
     return len(found) == len(hints)
 
 
+def _all_hints_coverage_rank(results: list[SearchResult], hints: list[str]) -> int | None:
+    found = set()
+    for result in results:
+        for hint in hints:
+            if _hint_in_path(result.path, hint):
+                found.add(hint)
+        if len(found) == len(hints):
+            return result.rank
+    return None
+
+
 def evaluate_retrieval(
     question_id: str,
     question_type: str,
@@ -75,8 +86,8 @@ def evaluate_retrieval(
         hit_at_1 = _hints_covered_at_k(results, source_hints, 1)
         hit_at_3 = _hints_covered_at_k(results, source_hints, 3)
         hit_at_5 = _hints_covered_at_k(results, source_hints, 5)
-        first_rank = _first_hint_rank(results, source_hints)
-        mrr = 1.0 / first_rank if first_rank else 0.0
+        coverage_rank = _all_hints_coverage_rank(results, source_hints)
+        mrr = 1.0 / coverage_rank if coverage_rank else 0.0
         ideal_dcg = sum(1.0 / math.log2(i + 2) for i in range(len(source_hints)))
         dcg = 0.0
         for result in results[:5]:
@@ -160,8 +171,11 @@ def build_default_answer_from_context(
 ) -> str:
     if not results:
         return "No relevant information found."
-    prioritized_results = list(results)
+    question_type = question_meta.get("question_type", "") if question_meta else ""
     source_hints = question_meta.get("source_hints", []) if question_meta else []
+    if question_type in {"abstention_strict", "abstention"} and not source_hints and results[0].score < 2.0:
+        return "No relevant information found in the benchmark wiki."
+    prioritized_results = list(results)
     if source_hints:
         prioritized_results.sort(key=lambda row: (0 if _any_hint(row.path, source_hints) else 1, row.rank))
     snippets: list[str] = []
@@ -223,4 +237,3 @@ def evaluate_answer(
         if scored is not None:
             return scored
     return evaluate_default_answer(question_id, generated, ground_truth, question_type)
-

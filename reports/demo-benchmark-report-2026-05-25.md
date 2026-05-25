@@ -49,29 +49,30 @@ python3 -m openwiki.runner \
 
 | Provider | Accuracy | Recall@1 | Recall@3 | Recall@5 | MRR | Correct | Partial | Incorrect |
 |----------|----------|----------|----------|----------|-----|---------|---------|-----------|
-| filesystem | 96.4% | 0.875 | 1.000 | 1.000 | 1.000 | 8 | 0 | 0 |
-| mem0 | 96.4% | 0.875 | 1.000 | 1.000 | 1.000 | 8 | 0 | 0 |
+| filesystem | 41.2% | 0.875 | 1.000 | 1.000 | 0.917 | 1 | 5 | 2 |
+| mem0 | 40.9% | 0.875 | 1.000 | 1.000 | 0.938 | 1 | 5 | 2 |
 
 ## By Question Type
 
 | Provider | Type | Count | Accuracy | Recall@1 | Recall@3 | Recall@5 | MRR |
 |----------|------|-------|----------|----------|----------|----------|-----|
 | filesystem | abstention_strict | 1 | 100.0% | 1.000 | 1.000 | 1.000 | 1.000 |
-| filesystem | fact_recall | 4 | 92.8% | 1.000 | 1.000 | 1.000 | 1.000 |
-| filesystem | multi_hop_reasoning | 1 | 100.0% | 0.000 | 1.000 | 1.000 | 1.000 |
-| filesystem | policy_boundary | 1 | 100.0% | 1.000 | 1.000 | 1.000 | 1.000 |
-| filesystem | temporal_reasoning | 1 | 100.0% | 1.000 | 1.000 | 1.000 | 1.000 |
+| filesystem | fact_recall | 4 | 33.3% | 1.000 | 1.000 | 1.000 | 1.000 |
+| filesystem | multi_hop_reasoning | 1 | 25.4% | 0.000 | 1.000 | 1.000 | 0.333 |
+| filesystem | policy_boundary | 1 | 37.5% | 1.000 | 1.000 | 1.000 | 1.000 |
+| filesystem | temporal_reasoning | 1 | 33.3% | 1.000 | 1.000 | 1.000 | 1.000 |
 | mem0 | abstention_strict | 1 | 100.0% | 1.000 | 1.000 | 1.000 | 1.000 |
-| mem0 | fact_recall | 4 | 92.8% | 1.000 | 1.000 | 1.000 | 1.000 |
-| mem0 | multi_hop_reasoning | 1 | 100.0% | 0.000 | 1.000 | 1.000 | 1.000 |
-| mem0 | policy_boundary | 1 | 100.0% | 1.000 | 1.000 | 1.000 | 1.000 |
-| mem0 | temporal_reasoning | 1 | 100.0% | 1.000 | 1.000 | 1.000 | 1.000 |
+| mem0 | fact_recall | 4 | 33.0% | 1.000 | 1.000 | 1.000 | 1.000 |
+| mem0 | multi_hop_reasoning | 1 | 25.4% | 0.000 | 1.000 | 1.000 | 0.500 |
+| mem0 | policy_boundary | 1 | 34.1% | 1.000 | 1.000 | 1.000 | 1.000 |
+| mem0 | temporal_reasoning | 1 | 35.3% | 1.000 | 1.000 | 1.000 | 1.000 |
 
 ## Interpretation
 
-- On the current public demo dataset, `filesystem` and `mem0` are effectively tied.
-- The benchmark is already useful as a regression baseline because it covers multiple capability classes instead of only direct fact lookup.
-- The current tie means this dataset is a good smoke benchmark, but not yet a stress benchmark for differentiating retrieval architectures.
+- On the current public demo dataset, `filesystem` and `mem0` are close on retrieval and answer quality.
+- `mem0` has a slightly better overall MRR because it covers the multi-hop source set earlier.
+- The answer score is an extractive baseline: it measures whether retrieved snippets overlap with the expected answer without using an LLM synthesis step.
+- This dataset is useful as a smoke benchmark, but not yet a stress benchmark for differentiating retrieval architectures.
 - The next meaningful optimization step is to add a harder public dataset with:
   - more cross-document aggregation
   - more semantic gap questions
@@ -81,3 +82,4 @@ python3 -m openwiki.runner \
 
 This report is based on live runs against the repository's public demo docs, not on hand-entered scores.
 Both providers were evaluated on the same dataset and question set.
+The demo evaluator does not return canned answers by question id; answer scores come from retrieved evidence snippets and keyword-overlap judging.
